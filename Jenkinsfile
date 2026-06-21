@@ -275,7 +275,7 @@ pipeline {
 
                     echo ""
                     echo "--- Docker Images Built in This Run ---"
-                    docker images | grep "finsight" | awk '{ printf "%-40s %-20s %-15s\n", $1, $2, $7 }'
+                    /usr/bin/docker images | grep "finsight" | awk '{ printf "%-40s %-20s %-15s\\n", $1, $2, $7 }' || true
 
                     echo ""
                     echo "✅ Deployment verification complete."
