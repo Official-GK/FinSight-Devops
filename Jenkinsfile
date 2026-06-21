@@ -94,7 +94,7 @@ pipeline {
                         sh '''
                             echo "Running Analytics API tests inside Docker container..."
                             /usr/bin/docker run --rm \
-                                -v ${PROJECT_DIR}/analytics-api:/app \
+                                -v /Users/gauravkulkarni/Desktop/Devops_financialRisk/analytics-api:/app \
                                 -w /app \
                                 python:3.12-slim \
                                 sh -c "pip install --quiet -r requirements.txt pytest pytest-asyncio httpx pytest-mock && \
@@ -109,7 +109,7 @@ pipeline {
                         sh '''
                             echo "Running Risk Engine tests inside Docker container..."
                             /usr/bin/docker run --rm \
-                                -v ${PROJECT_DIR}/risk-engine:/app \
+                                -v /Users/gauravkulkarni/Desktop/Devops_financialRisk/risk-engine:/app \
                                 -w /app \
                                 python:3.12-slim \
                                 sh -c "pip install --quiet -r requirements.txt pytest pytest-asyncio httpx pytest-mock && \
