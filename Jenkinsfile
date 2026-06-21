@@ -92,21 +92,14 @@ pipeline {
                     steps {
                         echo '--- Running Analytics API Tests ---'
                         sh '''
-                            cd ${PROJECT_DIR}/analytics-api
-                            # Create a virtual environment & install deps
-                            python3 -m venv .test-venv
-                            . .test-venv/bin/activate
-                            pip install --quiet -r requirements.txt
-                            pip install --quiet pytest pytest-asyncio httpx pytest-mock
-
-                            echo "Running pytest for Analytics API..."
-                            python -m pytest tests/ -v --tb=short \
-                                -m "unit" \
-                                --junit-xml=test-results-api.xml \
-                                2>&1 || true
-
-                            deactivate
-                            echo "✅ Analytics API tests complete."
+                            echo "Running Analytics API tests inside Docker container..."
+                            docker run --rm \
+                                -v ${PROJECT_DIR}/analytics-api:/app \
+                                -w /app \
+                                python:3.12-slim \
+                                sh -c "pip install --quiet -r requirements.txt pytest pytest-asyncio httpx pytest-mock && \
+                                       python -m pytest tests/ -v --tb=short -m unit 2>&1 || true && \
+                                       echo '✅ Analytics API tests complete.'"
                         '''
                     }
                 }
@@ -114,25 +107,20 @@ pipeline {
                     steps {
                         echo '--- Running Risk Engine Tests ---'
                         sh '''
-                            cd ${PROJECT_DIR}/risk-engine
-                            python3 -m venv .test-venv
-                            . .test-venv/bin/activate
-                            pip install --quiet -r requirements.txt
-                            pip install --quiet pytest pytest-asyncio httpx pytest-mock
-
-                            echo "Running pytest for Risk Engine..."
-                            python -m pytest tests/ -v --tb=short \
-                                -m "unit" \
-                                --junit-xml=test-results-engine.xml \
-                                2>&1 || true
-
-                            deactivate
-                            echo "✅ Risk Engine tests complete."
+                            echo "Running Risk Engine tests inside Docker container..."
+                            docker run --rm \
+                                -v ${PROJECT_DIR}/risk-engine:/app \
+                                -w /app \
+                                python:3.12-slim \
+                                sh -c "pip install --quiet -r requirements.txt pytest pytest-asyncio httpx pytest-mock && \
+                                       python -m pytest tests/ -v --tb=short -m unit 2>&1 || true && \
+                                       echo '✅ Risk Engine tests complete.'"
                         '''
                     }
                 }
             }
         }
+
 
         // ─── STAGE 5: Docker Build ───────────────────────────────────────────
         stage('Docker Build') {
