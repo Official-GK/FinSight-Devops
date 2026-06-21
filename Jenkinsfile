@@ -319,7 +319,7 @@ pipeline {
             echo '║    ❌ BUILD FAILED — Initiating Rollback ║'
             echo '╚══════════════════════════════════════════╝'
             echo ''
-            node {
+            node('') {
                 sh '''
                     echo "Rollback procedure starting..."
                     echo ""
@@ -344,7 +344,7 @@ pipeline {
         always {
             echo "Pipeline finished at: ${new Date()}"
             echo "Cleaning up temporary test containers..."
-            node {
+            node('') {
                 sh '''
                     docker rm -f test-frontend test-engine test-api 2>/dev/null || true
                     echo "Cleanup complete."
