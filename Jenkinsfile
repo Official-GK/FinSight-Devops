@@ -93,7 +93,7 @@ pipeline {
                         echo '--- Running Analytics API Tests ---'
                         sh '''
                             echo "Running Analytics API tests inside Docker container..."
-                            docker run --rm \
+                            /usr/bin/docker run --rm \
                                 -v ${PROJECT_DIR}/analytics-api:/app \
                                 -w /app \
                                 python:3.12-slim \
@@ -108,7 +108,7 @@ pipeline {
                         echo '--- Running Risk Engine Tests ---'
                         sh '''
                             echo "Running Risk Engine tests inside Docker container..."
-                            docker run --rm \
+                            /usr/bin/docker run --rm \
                                 -v ${PROJECT_DIR}/risk-engine:/app \
                                 -w /app \
                                 python:3.12-slim \
@@ -130,24 +130,24 @@ pipeline {
                 echo '════════════════════════════════════════'
                 sh '''
                     echo "Building Frontend Docker Image..."
-                    docker build \
-                        -t ${FRONTEND_IMAGE} \
+                    /usr/bin/docker build \
+                        -t devops_financialrisk-frontend:latest \
                         -t finsight/frontend:latest \
                         ${PROJECT_DIR}/frontend/
                     echo "✅ Frontend image built: ${FRONTEND_IMAGE}"
 
                     echo ""
                     echo "Building Analytics API Docker Image..."
-                    docker build \
-                        -t ${API_IMAGE} \
+                    /usr/bin/docker build \
+                        -t devops_financialrisk-analytics-api:latest \
                         -t finsight/analytics-api:latest \
                         ${PROJECT_DIR}/analytics-api/
                     echo "✅ Analytics API image built: ${API_IMAGE}"
 
                     echo ""
                     echo "Building Risk Engine Docker Image..."
-                    docker build \
-                        -t ${ENGINE_IMAGE} \
+                    /usr/bin/docker build \
+                        -t devops_financialrisk-risk-engine:latest \
                         -t finsight/risk-engine:latest \
                         ${PROJECT_DIR}/risk-engine/
                     echo "✅ Risk Engine image built: ${ENGINE_IMAGE}"
@@ -163,32 +163,32 @@ pipeline {
                 echo '════════════════════════════════════════'
                 sh '''
                     echo "Listing all FinSight Docker images:"
-                    docker images | grep finsight
+                    /usr/bin/docker images | grep finsight
 
                     echo ""
                     echo "Smoke-testing Frontend container..."
-                    docker run --rm -d --name test-frontend -p 15173:80 finsight/frontend:latest
+                    /usr/bin/docker run --rm -d --name test-frontend -p 15173:80 finsight/frontend:latest
                     sleep 2
                     curl -sf http://localhost:15173 | head -5 && echo "✅ Frontend responds!"
-                    docker stop test-frontend
+                    /usr/bin/docker stop test-frontend
 
                     echo ""
                     echo "Smoke-testing Risk Engine container..."
-                    docker run --rm -d --name test-engine -p 18001:8001 finsight/risk-engine:latest
+                    /usr/bin/docker run --rm -d --name test-engine -p 18001:8001 finsight/risk-engine:latest
                     sleep 3
                     curl -sf http://localhost:18001/health && echo ""
                     echo "✅ Risk Engine health check passed!"
-                    docker stop test-engine
+                    /usr/bin/docker stop test-engine
 
                     echo ""
                     echo "Smoke-testing Analytics API container..."
-                    docker run --rm -d --name test-api \
+                    /usr/bin/docker run --rm -d --name test-api \
                         -e RISK_ENGINE_URL=http://localhost:8001 \
                         -p 18000:8000 finsight/analytics-api:latest
                     sleep 3
                     curl -sf http://localhost:18000/health && echo ""
                     echo "✅ Analytics API health check passed!"
-                    docker stop test-api
+                    /usr/bin/docker stop test-api
 
                     echo ""
                     echo "✅ All Docker images verified successfully!"
@@ -224,11 +224,11 @@ pipeline {
                         ls ${PROJECT_DIR}/kubernetes/
                         echo ""
                         echo "Validating manifest syntax (Docker Compose deployment used for local demo)..."
-                        docker-compose -f ${PROJECT_DIR}/docker-compose.yml config --quiet
+                        /usr/bin/docker-compose -f ${PROJECT_DIR}/docker-compose.yml config --quiet
                         echo "✅ Docker Compose config valid."
                         echo ""
                         echo "--- Current Running Services (docker-compose) ---"
-                        docker-compose -f ${PROJECT_DIR}/docker-compose.yml ps 2>/dev/null || true
+                        /usr/bin/docker-compose -f ${PROJECT_DIR}/docker-compose.yml ps 2>/dev/null || true
                         echo ""
                         echo "✅ Deployment stage complete (Local Docker mode)."
                     fi
@@ -248,7 +248,7 @@ pipeline {
 
                     # Verify docker containers are running
                     echo "--- Docker Container Status ---"
-                    docker ps --filter name=devops_financialrisk --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+                    /usr/bin/docker ps --filter name=devops_financialrisk --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
                     echo ""
                     echo "--- API Health Checks ---"
@@ -321,8 +321,8 @@ pipeline {
                         echo "✅ Kubernetes rollback initiated."
                     else
                         echo "Rolling back to last known good Docker Compose state..."
-                        docker-compose -f /workspace/finsight/docker-compose.yml down || true
-                        docker-compose -f /workspace/finsight/docker-compose.yml up -d || true
+                        /usr/bin/docker-compose -f /workspace/finsight/docker-compose.yml down || true
+                        /usr/bin/docker-compose -f /workspace/finsight/docker-compose.yml up -d || true
                         echo "✅ Docker Compose rollback complete."
                     fi
                 '''
@@ -334,7 +334,7 @@ pipeline {
             echo "Cleaning up temporary test containers..."
             node('') {
                 sh '''
-                    docker rm -f test-frontend test-engine test-api 2>/dev/null || true
+                    /usr/bin/docker rm -f test-frontend test-engine test-api 2>/dev/null || true
                     echo "Cleanup complete."
                 '''
             }
