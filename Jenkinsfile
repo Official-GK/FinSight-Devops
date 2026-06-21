@@ -319,33 +319,37 @@ pipeline {
             echo '║    ❌ BUILD FAILED — Initiating Rollback ║'
             echo '╚══════════════════════════════════════════╝'
             echo ''
-            sh '''
-                echo "Rollback procedure starting..."
-                echo ""
+            node {
+                sh '''
+                    echo "Rollback procedure starting..."
+                    echo ""
 
-                # If Kubernetes is available, rollback the deployments
-                if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
-                    echo "Rolling back Kubernetes deployments..."
-                    kubectl rollout undo deployment/frontend-deployment -n finsight || true
-                    kubectl rollout undo deployment/analytics-api-deployment -n finsight || true
-                    kubectl rollout undo deployment/risk-engine-deployment -n finsight || true
-                    echo "✅ Kubernetes rollback initiated."
-                else
-                    echo "Rolling back to last known good Docker Compose state..."
-                    docker-compose -f /workspace/finsight/docker-compose.yml down || true
-                    docker-compose -f /workspace/finsight/docker-compose.yml up -d || true
-                    echo "✅ Docker Compose rollback complete."
-                fi
-            '''
+                    # If Kubernetes is available, rollback the deployments
+                    if command -v kubectl >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
+                        echo "Rolling back Kubernetes deployments..."
+                        kubectl rollout undo deployment/frontend-deployment -n finsight || true
+                        kubectl rollout undo deployment/analytics-api-deployment -n finsight || true
+                        kubectl rollout undo deployment/risk-engine-deployment -n finsight || true
+                        echo "✅ Kubernetes rollback initiated."
+                    else
+                        echo "Rolling back to last known good Docker Compose state..."
+                        docker-compose -f /workspace/finsight/docker-compose.yml down || true
+                        docker-compose -f /workspace/finsight/docker-compose.yml up -d || true
+                        echo "✅ Docker Compose rollback complete."
+                    fi
+                '''
+            }
         }
 
         always {
             echo "Pipeline finished at: ${new Date()}"
             echo "Cleaning up temporary test containers..."
-            sh '''
-                docker rm -f test-frontend test-engine test-api 2>/dev/null || true
-                echo "Cleanup complete."
-            '''
+            node {
+                sh '''
+                    docker rm -f test-frontend test-engine test-api 2>/dev/null || true
+                    echo "Cleanup complete."
+                '''
+            }
         }
     }
 }
