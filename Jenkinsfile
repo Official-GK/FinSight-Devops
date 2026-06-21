@@ -131,7 +131,7 @@ pipeline {
                 sh '''
                     echo "Building Frontend Docker Image..."
                     /usr/bin/docker build \
-                        -t devops_financialrisk-frontend:latest \
+                        -t finsight-frontend:latest \
                         -t finsight/frontend:latest \
                         ${PROJECT_DIR}/frontend/
                     echo "✅ Frontend image built: ${FRONTEND_IMAGE}"
@@ -139,7 +139,7 @@ pipeline {
                     echo ""
                     echo "Building Analytics API Docker Image..."
                     /usr/bin/docker build \
-                        -t devops_financialrisk-analytics-api:latest \
+                        -t finsight-analytics-api:latest \
                         -t finsight/analytics-api:latest \
                         ${PROJECT_DIR}/analytics-api/
                     echo "✅ Analytics API image built: ${API_IMAGE}"
@@ -147,7 +147,7 @@ pipeline {
                     echo ""
                     echo "Building Risk Engine Docker Image..."
                     /usr/bin/docker build \
-                        -t devops_financialrisk-risk-engine:latest \
+                        -t finsight-risk-engine:latest \
                         -t finsight/risk-engine:latest \
                         ${PROJECT_DIR}/risk-engine/
                     echo "✅ Risk Engine image built: ${ENGINE_IMAGE}"
@@ -225,6 +225,10 @@ pipeline {
                         /usr/bin/docker-compose -f ${PROJECT_DIR}/docker-compose.yml config --quiet
                         echo "✅ Docker Compose config valid."
                         echo ""
+                        echo "Deploying application to local Docker Engine..."
+                        /usr/bin/docker-compose -f ${PROJECT_DIR}/docker-compose.yml up -d --no-build
+                        echo "✅ Application deployed successfully!"
+                        echo ""
                         echo "--- Current Running Services (docker-compose) ---"
                         /usr/bin/docker-compose -f ${PROJECT_DIR}/docker-compose.yml ps 2>/dev/null || true
                         echo ""
@@ -246,7 +250,7 @@ pipeline {
 
                     # Verify docker containers are running
                     echo "--- Docker Container Status ---"
-                    /usr/bin/docker ps --filter name=devops_financialrisk --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+                    /usr/bin/docker ps --filter name=finsight --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 
                     echo ""
                     echo "--- API Health Checks ---"
