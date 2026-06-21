@@ -50,8 +50,9 @@ The project follows modern DevOps practices including containerization, CI/CD au
 **DevOps Tools**
 * Docker & Docker Compose
 * Jenkins (Declarative Pipeline)
-* Terraform (AWS EKS, VPC)
-* Kubernetes (Deployments, HPA, Services, Ingress)
+* Bash Automation (Clean-slate deployment scripts)
+* Terraform (Infrastructure as Code for AWS)
+* Kubernetes (K3s, Deployments, HPA, Services, NodePorts)
 * Prometheus
 * Grafana
 * ELK Stack (Elasticsearch, Logstash, Kibana, Filebeat)
@@ -83,9 +84,9 @@ The complete platform is containerized using Docker. Each microservice runs in a
 * PostgreSQL Container
 * Vault Container
 * Prometheus & Grafana Containers
-* ELK Stack Containers (Elasticsearch, Logstash, Kibana)
+* ELK Stack Containers (Elasticsearch, Logstash, Kibana, Filebeat)
 
-*[Insert Screenshot: Docker Containers running / docker-compose ps]*
+*[Insert Screenshot: Built Docker Images / `docker images`]*
 
 ## 4.2 CI/CD Pipeline using Jenkins
 A declarative Jenkins pipeline automates the software delivery process, strictly ensuring that failing code never reaches production.
@@ -94,10 +95,10 @@ A declarative Jenkins pipeline automates the software delivery process, strictly
 1. Source Code Checkout
 2. Test & Lint (Static Code Analysis)
 3. Docker Image Build (Frontend & Backend)
-4. Push to Docker Registry
-5. Deploy to Kubernetes (using dynamic tag injection)
-6. Verify Deployment (`kubectl rollout status`)
-7. Automated Rollback (Triggers `kubectl rollout undo` on failure)
+4. Push to Container Registry / Import to K3s
+5. Deploy to AWS Kubernetes Cluster (`kubectl apply`)
+6. Verify Deployment (Health checks & pod status)
+7. Automated Rollback (Triggers `kubectl rollout undo` and restores previous state on failure)
 
 **Benefits:**
 * Automated testing
@@ -131,14 +132,17 @@ Sensitive information such as PostgreSQL database credentials are removed comple
 
 *[Insert Screenshot: Vault UI / Secret Engine]*
 
-## 4.5 Infrastructure as Code using Terraform
+## 4.5 Infrastructure & Kubernetes Orchestration
 The underlying cloud infrastructure is provisioned dynamically using HashiCorp Terraform, preventing manual configuration drift.
 
 **Resources Provisioned:**
-* Highly Available AWS VPC (spanning 3 Availability Zones)
-* Public and Private Subnets
-* Amazon Elastic Kubernetes Service (EKS) Cluster
-* Managed Node Groups (t3.large instances optimized for Risk calculations)
+* Highly Available AWS Cloud Infrastructure
+* Amazon EC2 Instance (m7i-flex.large / t3.large optimized for Risk calculations)
+* Security Groups and Network rules via Terraform
+* K3s (Lightweight Kubernetes) cluster installed on EC2
+* Automated bash scripts for namespace wiping, Docker image builds, and manifest application
+
+*[Insert Screenshot: Kubernetes Pods running / `kubectl get pods -n finsight`]*
 
 ## 4.6 Auto-Scaling & Disaster Recovery
 The platform uses Kubernetes Horizontal Pod Autoscalers (HPA) and a dedicated "Market Volatility Simulator" to test system resilience.
@@ -208,7 +212,8 @@ The project successfully demonstrates:
 * High-throughput financial risk calculation
 * Containerized microservice deployment
 * Resilient CI/CD automation with automatic rollbacks
-* Seamless Infrastructure as Code (Terraform EKS)
+* Infrastructure as Code using Terraform
+* Seamless Kubernetes deployment using K3s on AWS EC2
 * Dynamic Kubernetes Auto-scaling (HPA)
 * Enterprise-grade Security (HashiCorp Vault secret injection)
 * Comprehensive Monitoring (Prometheus + Grafana)
@@ -231,4 +236,4 @@ The platform can be enhanced with:
 
 # 9. Links:
 **Github:** [Insert Your GitHub Repo URL Here]
-**Live Demo:** [Insert Deployment URL Here, if applicable]
+**Live Demo:** http://16.170.218.31:30080

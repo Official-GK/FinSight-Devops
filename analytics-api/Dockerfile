@@ -44,7 +44,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ENVIRONMENT="production" \
     HOST="0.0.0.0" \
     PORT="8000" \
-    WORKERS="4" \
+    WORKERS="1" \
     LOG_LEVEL="INFO" \
     RISK_ENGINE_URL="http://risk-engine-service:8001"
 
@@ -77,7 +77,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
 CMD ["uvicorn", "app.main:app", \
      "--host", "0.0.0.0", \
      "--port", "8000", \
-     "--workers", "4", \
+     "--workers", "1", \
      "--loop", "uvloop", \
      "--log-level", "warning", \
      "--access-log", \

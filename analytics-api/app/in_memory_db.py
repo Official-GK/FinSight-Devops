@@ -22,6 +22,12 @@ class InMemoryStats:
         self.last_tick = int(time.time())
         self.current_second_requests = 0
         self.rps = 0.0
+        self.transaction_id_counter = 0
+
+    def get_next_transaction_id(self):
+        with self.lock:
+            self.transaction_id_counter += 1
+            return self.transaction_id_counter
 
     def record_transaction(self, response):
         with self.lock:

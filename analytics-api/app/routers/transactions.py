@@ -70,8 +70,9 @@ async def analyze_transaction(
     4. Classify the returned risk score
     5. Record all metrics and return structured response
     """
-    # Ensure we always have a transaction_id for tracing
-    transaction_id = payload.transaction_id or str(uuid.uuid4())
+    from app.in_memory_db import db
+    seq = db.get_next_transaction_id()
+    transaction_id = payload.transaction_id or f"TXN-{seq:06d}"
 
     # Bind context variables for structured logging throughout this request
     structlog.contextvars.bind_contextvars(

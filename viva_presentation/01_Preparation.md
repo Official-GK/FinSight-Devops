@@ -10,30 +10,26 @@ Have the following files open in separate tabs so you can click them instantly w
 - `vault/setup.sh` (To show Security)
 
 ## 2. Prepare Your Terminals
-Open **THREE** separate terminal windows or split panes.
+Open **TWO** separate terminal windows or split panes.
 
-### Terminal 1: Run the Backend
-```bash
-cd /Users/gauravkulkarni/Desktop/Devops_financialRisk
-./start_backend.sh
-```
-*(Leave this running in the background. It starts both FastAPI services.)*
-
-### Terminal 2: Run the Frontend
-```bash
-cd /Users/gauravkulkarni/Desktop/Devops_financialRisk/frontend
-npm run dev
-```
-*(Leave this running in the background.)*
-
-### Terminal 3: The "Demo" Terminal
+### Terminal 1: The "Demo" Terminal (AWS EC2)
 Make sure this terminal is completely clean (`clear`). 
-You will use this terminal *live* in front of the panel to type `kubectl` commands to prove your infrastructure works.
+You will use this terminal *live* in front of the panel to type `kubectl` commands directly on your AWS Kubernetes Cluster.
+
+To connect to it, run:
+```bash
+ssh -i ~/Desktop/demo-key.pem ubuntu@16.170.218.31
+```
+*(Keep this connected and ready for the demo)*
+
+### Terminal 2: Jenkins Logs (Optional)
+If you want to show live logs, keep a terminal ready, but you will mostly use the Jenkins web UI.
 
 ## 3. Prepare the Browser
 1. Open Google Chrome.
-2. Go to `http://localhost:5173`.
-3. Put the browser in **Full Screen**. Make sure the dashboard looks clean.
+2. Go to Jenkins: `http://localhost:8080`. Have the FinSight-CI-CD pipeline open. *(Running locally on your Mac)*
+3. Keep a second tab ready for the Dashboard: `http://16.170.218.31`. *(Running in the AWS Kubernetes Cluster)*
+4. Put the browser in **Full Screen**. Make sure the dashboard looks clean.
 
 ---
 **When the panel says "You may begin", open the `02_Introduction.md` file.**

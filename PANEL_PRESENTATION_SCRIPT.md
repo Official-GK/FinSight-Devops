@@ -43,7 +43,7 @@ This guide is a step-by-step script for your evaluation viva. Follow this exactl
 1. Click the **Demo Mode** button in the top right corner of the dashboard.
 2. Navigate to the **Transactions** tab to show the graph spiking.
 3. Navigate to the **Infrastructure** tab.
-4. **Explain:** "Under normal circumstances, the Risk Engine runs on 5 pods. However, because our Kubernetes Horizontal Pod Autoscaler (HPA) detects CPU spikes over 75%, it will automatically scale up to 20 pods to prevent bottlenecks."
+4. **Explain:** "Under normal circumstances, the Risk Engine runs on 3 pods. However, because our Kubernetes Horizontal Pod Autoscaler (HPA) detects CPU spikes over 75%, it will automatically scale up to 10 pods to prevent bottlenecks."
 
 *If the panel asks for proof of the HPA command, open a terminal and type:*
 ```bash
@@ -70,15 +70,17 @@ kubectl get hpa -n finsight
 
 ---
 
-## ⏱️ Minute 6-8: Scenario 3 - CI/CD & Deployment Rollbacks
+## ⏱️ Minute 6-8: Scenario 3 - CI/CD & Automated Testing
 **What to say:**
-> "To solve the issue of delayed releases and deployment failures, we implemented a fully automated Jenkins CI/CD pipeline."
+> "To solve the issue of delayed releases and untested code, we implemented a fully automated Jenkins CI/CD pipeline that runs tests inside isolated Docker environments."
 
 **What to do:**
-1. Open the `Jenkinsfile` in your IDE and briefly scroll through it.
-2. **Explain:** "Our pipeline automatically builds the Docker images, runs PyTest unit tests, and pushes to our registry. It then uses `sed` to dynamically update our Kubernetes YAML manifests."
-3. **The Rollback:** Highlight the `post { failure }` block at the bottom of the Jenkinsfile. 
-4. **Explain:** "If a bad deployment occurs and Kubernetes readiness probes fail, the Jenkins pipeline catches the timeout and automatically executes a `kubectl rollout undo` command. This ensures zero downtime even during failed releases."
+1. Open the Jenkins dashboard at `http://localhost:8080` and show the fully green `FinSight-CI-CD` pipeline.
+2. Click on the latest build (#12) and open the **Console Output**.
+3. **Explain:** "Our pipeline automatically checks out the code, and then spins up ephemeral Docker containers (like `python:3.12-slim`) to run PyTest on our API and Risk Engine. This ensures no environment pollution."
+4. Scroll down the console output to show the **Docker Build** and **Smoke Testing** stages.
+5. **The Rollback:** Highlight the end of the Console Output or the `Jenkinsfile` post-actions. 
+6. **Explain:** "If a bad deployment occurs or a test fails, the pipeline immediately initiates a rollback, using `docker-compose down` and `docker-compose up -d --no-build` to restore the last known good configuration automatically."
 
 ---
 

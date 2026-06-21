@@ -6,7 +6,7 @@ metadata:
   labels:
     app: analytics-api
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: analytics-api
@@ -14,11 +14,6 @@ spec:
     metadata:
       labels:
         app: analytics-api
-      annotations:
-        vault.hashicorp.com/agent-inject: "true"
-        vault.hashicorp.com/role: "analytics-api"
-        vault.hashicorp.com/agent-inject-secret-credentials.txt: "secret/data/analytics-api/credentials"
-        vault.hashicorp.com/agent-inject-secret-database.txt: "secret/data/shared/database"
     spec:
       containers:
       - name: analytics-api
@@ -33,7 +28,7 @@ spec:
             name: finsight-secrets
         resources:
           requests:
-            cpu: "200m"
+            cpu: "50m"
             memory: "256Mi"
           limits:
             cpu: "500m"
@@ -42,14 +37,16 @@ spec:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 15
-          periodSeconds: 20
+          initialDelaySeconds: 20
+          periodSeconds: 30
+          failureThreshold: 5
         readinessProbe:
           httpGet:
             path: /health
             port: 8000
-          initialDelaySeconds: 5
+          initialDelaySeconds: 10
           periodSeconds: 10
+          failureThreshold: 5
 ---
 apiVersion: v1
 kind: Service
@@ -63,24 +60,5 @@ spec:
     - protocol: TCP
       port: 8000
       targetPort: 8000
-  type: ClusterIP
----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: analytics-api-hpa
-  namespace: finsight
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: analytics-api-deployment
-  minReplicas: 3
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
+      nodePort: 30800
+  type: NodePort

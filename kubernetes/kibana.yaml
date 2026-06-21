@@ -23,11 +23,11 @@ spec:
         - containerPort: 5601
         resources:
           limits:
-            cpu: 1000m
-            memory: 1Gi
-          requests:
             cpu: 500m
-            memory: 1Gi
+            memory: 1.5Gi
+          requests:
+            cpu: 100m
+            memory: 768Mi
 ---
 apiVersion: v1
 kind: Service
@@ -40,3 +40,5 @@ spec:
   ports:
   - port: 5601
     targetPort: 5601
+    nodePort: 30561
+  type: NodePort

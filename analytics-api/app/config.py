@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    WORKERS: int = 4
+    WORKERS: int = 1
 
     # Risk Engine
     RISK_ENGINE_URL: str = "http://risk-engine-service:8001"

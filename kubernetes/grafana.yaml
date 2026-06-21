@@ -1,0 +1,202 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: finsight
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-service:9090
+        access: proxy
+        isDefault: true
+        editable: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-provider
+  namespace: finsight
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'finsight'
+        orgId: 1
+        folder: 'FinSight'
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-finsight
+  namespace: finsight
+data:
+  finsight.json: |
+    {
+      "title": "FinSight – Financial Risk Analytics",
+      "uid": "finsight-main",
+      "version": 1,
+      "schemaVersion": 36,
+      "refresh": "5s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Total Transactions Analyzed",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+          "targets": [{"expr": "sum(analytics_api_transactions_analyzed_total)", "legendFormat": "Total", "datasource": "Prometheus"}],
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 0}]}}}
+        },
+        {
+          "id": 2,
+          "title": "API Requests Per Second",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+          "targets": [{"expr": "rate(analytics_api_requests_total{endpoint=\"/api/v1/analyze\"}[1m])", "legendFormat": "req/s", "datasource": "Prometheus"}],
+          "fieldConfig": {"defaults": {"unit": "reqps", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}}
+        },
+        {
+          "id": 3,
+          "title": "Active API Requests",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+          "targets": [{"expr": "analytics_api_active_requests", "legendFormat": "Active", "datasource": "Prometheus"}],
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 0}, {"color": "yellow", "value": 10}, {"color": "red", "value": 50}]}}}
+        },
+        {
+          "id": 4,
+          "title": "Risk Engine Retries",
+          "type": "stat",
+          "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+          "targets": [{"expr": "analytics_api_risk_engine_retries_total", "legendFormat": "Retries", "datasource": "Prometheus"}],
+          "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": 0}, {"color": "red", "value": 1}]}}}
+        },
+        {
+          "id": 5,
+          "title": "Transaction Analysis Rate (per minute)",
+          "type": "timeseries",
+          "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+          "targets": [{"expr": "rate(analytics_api_requests_total{endpoint=\"/api/v1/analyze\"}[1m]) * 60", "legendFormat": "Transactions/min", "datasource": "Prometheus"}],
+          "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "palette-classic"}}},
+          "options": {"tooltip": {"mode": "single"}}
+        },
+        {
+          "id": 6,
+          "title": "Risk Level Distribution (Rate)",
+          "type": "timeseries",
+          "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+          "targets": [
+            {"expr": "rate(analytics_api_transactions_analyzed_total{risk_level=\"LOW\"}[1m])", "legendFormat": "LOW ✅", "datasource": "Prometheus"},
+            {"expr": "rate(analytics_api_transactions_analyzed_total{risk_level=\"MEDIUM\"}[1m])", "legendFormat": "MEDIUM ⚠️", "datasource": "Prometheus"},
+            {"expr": "rate(analytics_api_transactions_analyzed_total{risk_level=\"HIGH\"}[1m])", "legendFormat": "HIGH 🔴", "datasource": "Prometheus"},
+            {"expr": "rate(analytics_api_transactions_analyzed_total{risk_level=\"CRITICAL\"}[1m])", "legendFormat": "CRITICAL 💀", "datasource": "Prometheus"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}}}
+        },
+        {
+          "id": 7,
+          "title": "API Latency (p99) by Endpoint",
+          "type": "timeseries",
+          "gridPos": {"h": 9, "w": 12, "x": 0, "y": 13},
+          "targets": [
+            {"expr": "histogram_quantile(0.99, rate(analytics_api_request_duration_seconds_bucket{endpoint=\"/api/v1/analyze\"}[1m])) * 1000", "legendFormat": "p99 /analyze (ms)", "datasource": "Prometheus"},
+            {"expr": "histogram_quantile(0.50, rate(analytics_api_request_duration_seconds_bucket{endpoint=\"/api/v1/analyze\"}[1m])) * 1000", "legendFormat": "p50 /analyze (ms)", "datasource": "Prometheus"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "ms", "color": {"mode": "palette-classic"}}}
+        },
+        {
+          "id": 8,
+          "title": "HTTP Error Rate (4xx + 5xx)",
+          "type": "timeseries",
+          "gridPos": {"h": 9, "w": 12, "x": 12, "y": 13},
+          "targets": [
+            {"expr": "rate(analytics_api_requests_total{http_status=~\"4..\"}[1m])", "legendFormat": "4xx Errors", "datasource": "Prometheus"},
+            {"expr": "rate(analytics_api_requests_total{http_status=~\"5..\"}[1m])", "legendFormat": "5xx Errors", "datasource": "Prometheus"}
+          ],
+          "fieldConfig": {"defaults": {"unit": "reqps", "color": {"mode": "palette-classic"}}}
+        }
+      ],
+      "time": {"from": "now-15m", "to": "now"}
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: finsight
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:10.2.0
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_USER
+          value: "admin"
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "finsight123"
+        - name: GF_AUTH_ANONYMOUS_ENABLED
+          value: "true"
+        - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+          value: "Viewer"
+        - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+          value: "/var/lib/grafana/dashboards/finsight.json"
+        - name: GF_FEATURE_TOGGLES_ENABLE
+          value: "publicDashboards"
+        volumeMounts:
+        - name: grafana-datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: grafana-dashboards-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: grafana-dashboard-finsight
+          mountPath: /var/lib/grafana/dashboards
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "300m"
+            memory: "256Mi"
+      volumes:
+      - name: grafana-datasources
+        configMap:
+          name: grafana-datasources
+      - name: grafana-dashboards-provider
+        configMap:
+          name: grafana-dashboards-provider
+      - name: grafana-dashboard-finsight
+        configMap:
+          name: grafana-dashboard-finsight
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-service
+  namespace: finsight
+spec:
+  selector:
+    app: grafana
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+      nodePort: 30300
+  type: NodePort

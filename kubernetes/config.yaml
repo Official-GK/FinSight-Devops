@@ -11,6 +11,7 @@ metadata:
 data:
   ENVIRONMENT: "production"
   LOG_LEVEL: "INFO"
+  WORKERS: "1"
   RISK_ENGINE_URL: "http://risk-engine-service:8001"
   DB_HOST: "postgres-service"
   DB_PORT: "5432"
