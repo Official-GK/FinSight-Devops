@@ -1,0 +1,153 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Risk Engine — Kubernetes Deployment
+# Internal-only service; receives risk calculation requests from Analytics API.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-engine
+  namespace: financial-risk
+  labels:
+    app: risk-engine
+    version: "1.0.0"
+    app.kubernetes.io/name: risk-engine
+    app.kubernetes.io/part-of: financial-risk-platform
+    app.kubernetes.io/component: engine
+  annotations:
+    description: "CPU-intensive risk score calculation service"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: risk-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
+  template:
+    metadata:
+      labels:
+        app: risk-engine
+        version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      # ── Scheduling ────────────────────────────────────────────────────────────
+      # Risk Engine is CPU-intensive; prefer nodes with more available CPU
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - risk-engine
+                topologyKey: kubernetes.io/hostname
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 90   # Longer grace — heavy workloads need more time
+      serviceAccountName: risk-engine-sa
+      automountServiceAccountToken: false
+
+      containers:
+        - name: risk-engine
+          image: YOUR_ECR_REGISTRY/risk-engine:1.0.0  # Replaced by CI/CD pipeline
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8001
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: WORKERS
+              value: "4"
+            # Risk parameters — can be overridden per environment
+            - name: MARKET_VOLATILITY_FACTOR
+              value: "0.0035"
+            - name: VOLATILITY_JITTER_PCT
+              value: "0.15"
+            - name: SCORE_NORMALIZATION_DIVISOR
+              value: "35000.0"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          # ── Resource Limits ────────────────────────────────────────────────────
+          # Risk Engine is CPU-bound — allocate more CPU than Analytics API
+          resources:
+            requests:
+              cpu: "500m"      # 0.5 vCPU (NumPy matrix ops)
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"     # 2 vCPU
+              memory: "1Gi"
+
+          # ── Probes ────────────────────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 18   # Up to 90s for NumPy to initialize
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}

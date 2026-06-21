@@ -1,0 +1,48 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Service Accounts — Least-privilege identities for each service
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: analytics-api-sa
+  namespace: financial-risk
+  labels:
+    app: analytics-api
+    app.kubernetes.io/part-of: financial-risk-platform
+  annotations:
+    # Annotate with AWS IAM role ARN for IRSA (IAM Roles for Service Accounts)
+    eks.amazonaws.com/role-arn: "arn:aws:iam::YOUR_ACCOUNT_ID:role/analytics-api-role"
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: risk-engine-sa
+  namespace: financial-risk
+  labels:
+    app: risk-engine
+    app.kubernetes.io/part-of: financial-risk-platform
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::YOUR_ACCOUNT_ID:role/risk-engine-role"
+automountServiceAccountToken: false
+---
+# ──────────────────────────────────────────────────────────────────────────────
+# Secrets — Placeholder values injected by Vault Agent Injector at pod startup
+# In production, Vault Agent replaces these with real values dynamically.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: analytics-api-secrets
+  namespace: financial-risk
+  labels:
+    app: analytics-api
+  annotations:
+    # Vault Agent will sync these values from Vault path: secret/analytics-api
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/role: "analytics-api"
+    vault.hashicorp.com/agent-inject-secret-api-key: "secret/data/analytics-api/credentials"
+type: Opaque
+data:
+  # Base64 encoded placeholder — replaced by Vault in production
+  api-key: cGxhY2Vob2xkZXI=   # "placeholder" in base64

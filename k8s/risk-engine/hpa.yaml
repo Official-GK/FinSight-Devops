@@ -1,0 +1,60 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Risk Engine — Horizontal Pod Autoscaler
+# Scales from 2 to 10 pods. Uses CPU as primary metric (70% target).
+# Risk Engine is CPU-bound so CPU-first scaling is intentional.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: risk-engine-hpa
+  namespace: financial-risk
+  labels:
+    app: risk-engine
+    app.kubernetes.io/part-of: financial-risk-platform
+  annotations:
+    description: "HPA for Risk Engine — CPU-driven scaling for matrix computation workloads"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: risk-engine
+
+  minReplicas: 2
+  maxReplicas: 10
+
+  metrics:
+    # Primary: CPU — Risk Engine workload is CPU-intensive (NumPy ops)
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Secondary: Memory — NumPy allocates significant heap for matrix ops
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30   # React faster than Analytics API (more CPU-sensitive)
+      policies:
+        - type: Pods
+          value: 3                      # Can add 3 pods at once under heavy load
+          periodSeconds: 60
+        - type: Percent
+          value: 100                    # Or double the current count
+          periodSeconds: 60
+      selectPolicy: Max
+
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+      selectPolicy: Min

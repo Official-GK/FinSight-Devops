@@ -1,0 +1,136 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Logstash ConfigMap — Pipeline for Financial Risk Platform logs
+# Parses JSON logs from structlog and enriches with metadata
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: monitoring
+  labels:
+    app: logstash
+data:
+  # Main Logstash settings
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    pipeline.workers: 2
+    pipeline.batch.size: 250
+    pipeline.batch.delay: 50
+    xpack.monitoring.enabled: false
+    log.level: warn
+
+  # Pipeline: ingest from Filebeat → parse → enrich → send to Elasticsearch
+  pipeline.conf: |
+    # ── INPUT ─────────────────────────────────────────────────────────────────
+    # Filebeat ships logs from all K8s pods using the Beats protocol
+    input {
+      beats {
+        port => 5044
+        type => "k8s-logs"
+      }
+    }
+
+    # ── FILTER ────────────────────────────────────────────────────────────────
+    filter {
+
+      # ── Parse JSON log lines from structlog ──────────────────────────────────
+      # Both services emit structured JSON (from logging_config.py in Phase 1)
+      if [message] =~ /^\{/ {
+        json {
+          source  => "message"
+          target  => "parsed"
+          tag_on_failure => ["_json_parse_failure"]
+        }
+
+        # Promote parsed fields to top-level
+        mutate {
+          rename => {
+            "[parsed][timestamp]"       => "@timestamp"
+            "[parsed][level]"           => "log_level"
+            "[parsed][event]"           => "event"
+            "[parsed][transaction_id]"  => "transaction_id"
+            "[parsed][amount]"          => "transaction_amount"
+            "[parsed][transaction_type]" => "transaction_type"
+            "[parsed][risk_score]"      => "risk_score"
+            "[parsed][risk_level]"      => "risk_level"
+            "[parsed][engine_latency_ms]" => "engine_latency_ms"
+            "[parsed][request_id]"      => "request_id"
+            "[parsed][status_code]"     => "http_status_code"
+            "[parsed][duration_ms]"     => "request_duration_ms"
+            "[parsed][error]"           => "error_message"
+          }
+          remove_field => ["parsed", "message"]
+        }
+      }
+
+      # ── Kubernetes Metadata Enrichment ─────────────────────────────────────
+      mutate {
+        add_field => {
+          "kubernetes_namespace"  => "%{[kubernetes][namespace]}"
+          "kubernetes_pod"        => "%{[kubernetes][pod][name]}"
+          "kubernetes_container"  => "%{[kubernetes][container][name]}"
+          "kubernetes_node"       => "%{[kubernetes][node][name]}"
+          "service_name"          => "%{[kubernetes][labels][app]}"
+        }
+      }
+
+      # ── Classify logs by service ───────────────────────────────────────────
+      if [kubernetes][labels][app] == "analytics-api" {
+        mutate { add_tag => ["analytics-api"] }
+      } else if [kubernetes][labels][app] == "risk-engine" {
+        mutate { add_tag => ["risk-engine"] }
+      }
+
+      # ── Convert numeric fields ─────────────────────────────────────────────
+      mutate {
+        convert => {
+          "transaction_amount"   => "float"
+          "risk_score"           => "float"
+          "engine_latency_ms"    => "float"
+          "request_duration_ms"  => "float"
+          "http_status_code"     => "integer"
+        }
+      }
+
+      # ── Flag high-risk transactions for fast Kibana filtering ─────────────
+      if [risk_score] and [risk_score] >= 80 {
+        mutate { add_tag => ["CRITICAL_RISK"] }
+      } else if [risk_score] and [risk_score] >= 50 {
+        mutate { add_tag => ["HIGH_RISK"] }
+      }
+
+      # ── Flag errors ────────────────────────────────────────────────────────
+      if [log_level] == "error" or [http_status_code] >= 500 {
+        mutate { add_tag => ["error"] }
+      }
+
+      # ── Remove internal Kubernetes metadata to save storage ────────────────
+      mutate {
+        remove_field => ["agent", "ecs", "input", "host", "@version"]
+      }
+    }
+
+    # ── OUTPUT ────────────────────────────────────────────────────────────────
+    output {
+      # All logs → Elasticsearch with daily rolling indices
+      elasticsearch {
+        hosts        => ["http://elasticsearch:9200"]
+        index        => "financial-risk-%{service_name}-%{+YYYY.MM.dd}"
+        action       => "index"
+        # Retry on temporary Elasticsearch failures
+        retry_on_conflict => 3
+      }
+
+      # Critical risk transactions → separate index for fast access
+      if "CRITICAL_RISK" in [tags] {
+        elasticsearch {
+          hosts => ["http://elasticsearch:9200"]
+          index => "financial-risk-critical-alerts-%{+YYYY.MM.dd}"
+        }
+      }
+
+      # Errors → stderr for Jenkins/Logstash debugging
+      if "error" in [tags] {
+        stderr { codec => rubydebug }
+      }
+    }

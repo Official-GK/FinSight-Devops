@@ -1,0 +1,174 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Analytics API — Kubernetes Deployment
+# 3 replicas with anti-affinity, resource limits, probes, and security context.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-api
+  namespace: financial-risk
+  labels:
+    app: analytics-api
+    version: "1.0.0"
+    app.kubernetes.io/name: analytics-api
+    app.kubernetes.io/part-of: financial-risk-platform
+    app.kubernetes.io/component: api
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    description: "FastAPI service for transaction risk analysis"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: analytics-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0  # Zero-downtime deployments
+
+  template:
+    metadata:
+      labels:
+        app: analytics-api
+        version: "1.0.0"
+      annotations:
+        # Tells Prometheus to scrape this pod
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # ── Scheduling ──────────────────────────────────────────────────────────
+      # Spread replicas across different nodes to avoid single-node failures
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - analytics-api
+                topologyKey: kubernetes.io/hostname
+
+      # ── Security ─────────────────────────────────────────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      # Grace period to allow in-flight requests to complete
+      terminationGracePeriodSeconds: 60
+
+      # ── Service Account ───────────────────────────────────────────────────────
+      serviceAccountName: analytics-api-sa
+      automountServiceAccountToken: false
+
+      containers:
+        - name: analytics-api
+          image: YOUR_ECR_REGISTRY/analytics-api:1.0.0  # Replaced by CI/CD pipeline
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          # ── Environment Variables ────────────────────────────────────────────
+          env:
+            - name: ENVIRONMENT
+              value: "production"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: WORKERS
+              value: "4"
+            - name: RISK_ENGINE_URL
+              value: "http://risk-engine-service:8001"
+            - name: RISK_ENGINE_TIMEOUT
+              value: "30.0"
+            - name: RISK_ENGINE_MAX_RETRIES
+              value: "3"
+            # Inject secrets from Kubernetes Secret (populated by Vault Agent)
+            - name: SECRET_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: analytics-api-secrets
+                  key: api-key
+                  optional: true
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+
+          # ── Resource Requests & Limits ──────────────────────────────────────
+          # Requests = what Kubernetes reserves; Limits = hard ceiling
+          resources:
+            requests:
+              cpu: "250m"      # 0.25 vCPU
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"     # 1 vCPU
+              memory: "512Mi"
+
+          # ── Probes ──────────────────────────────────────────────────────────
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1
+
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12   # Up to 60s for startup (12 × 5s)
+
+          # ── Container Security ───────────────────────────────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # ── Volume Mounts ────────────────────────────────────────────────────
+          volumeMounts:
+            - name: tmp-volume
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp-volume
+          emptyDir: {}

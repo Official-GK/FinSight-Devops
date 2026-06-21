@@ -1,0 +1,28 @@
+{
+  "title": "Application Monitoring",
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "Request Rate (RPS)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "rate(http_requests_total[1m])",
+          "legendFormat": "{{path}} - {{method}}"
+        }
+      ]
+    },
+    {
+      "title": "Response Time (Latencies)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "rate(http_request_duration_seconds_sum[1m]) / rate(http_request_duration_seconds_count[1m])",
+          "legendFormat": "Average Latency"
+        }
+      ]
+    }
+  ]
+}

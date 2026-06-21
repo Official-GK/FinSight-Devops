@@ -1,0 +1,63 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Analytics API — Horizontal Pod Autoscaler
+# Scales from 2 to 10 pods based on CPU utilization (target: 70%).
+# Also includes memory scaling as a secondary metric.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: analytics-api-hpa
+  namespace: financial-risk
+  labels:
+    app: analytics-api
+    app.kubernetes.io/part-of: financial-risk-platform
+  annotations:
+    description: "HPA for Analytics API — scales on CPU (70%) and memory (80%)"
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: analytics-api
+
+  # ── Replica Bounds ───────────────────────────────────────────────────────────
+  minReplicas: 2
+  maxReplicas: 10
+
+  # ── Scaling Metrics ──────────────────────────────────────────────────────────
+  metrics:
+    # Primary: CPU utilization — scale up at 70% average across all pods
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+    # Secondary: Memory utilization — scale up at 80%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  # ── Scaling Behavior ──────────────────────────────────────────────────────────
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60   # Wait 60s before scaling up again
+      policies:
+        - type: Pods
+          value: 2                      # Add at most 2 pods per scaling event
+          periodSeconds: 60
+        - type: Percent
+          value: 50                     # Or increase by 50% of current count
+          periodSeconds: 60
+      selectPolicy: Max                 # Use whichever policy adds more pods
+
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 min before scaling down (avoids flapping)
+      policies:
+        - type: Pods
+          value: 1                      # Remove at most 1 pod per scaling event
+          periodSeconds: 120
+      selectPolicy: Min                 # Conservative scale-down

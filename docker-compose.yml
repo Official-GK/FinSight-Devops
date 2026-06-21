@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - analytics-api
+    networks:
+      - finsight-network
+    restart: unless-stopped
+
+  analytics-api:
+    build:
+      context: ./analytics-api
+    ports:
+      - "8000:8000"
+    environment:
+      - RISK_ENGINE_URL=http://risk-engine:8001
+      - LOG_LEVEL=INFO
+      - WORKERS=4
+    depends_on:
+      - risk-engine
+    networks:
+      - finsight-network
+    restart: unless-stopped
+
+  risk-engine:
+    build:
+      context: ./risk-engine
+    ports:
+      - "8001:8001"
+    environment:
+      - LOG_LEVEL=INFO
+      - WORKERS=4
+    networks:
+      - finsight-network
+    restart: unless-stopped
+
+networks:
+  finsight-network:
+    driver: bridge

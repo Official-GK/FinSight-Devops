@@ -1,0 +1,12 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Kubernetes Namespace
+# Isolates all Financial Risk Platform resources from other workloads.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: financial-risk
+  labels:
+    app.kubernetes.io/part-of: financial-risk-platform
+    environment: production
+    team: sre

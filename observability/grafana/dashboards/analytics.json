@@ -1,0 +1,28 @@
+{
+  "title": "Financial Analytics",
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "Risk Analysis Throughput",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "rate(risk_analysis_requests_total[1m])",
+          "legendFormat": "Analyses / Sec"
+        }
+      ]
+    },
+    {
+      "title": "Average Risk Score",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "avg_over_time(risk_score_value[5m])",
+          "legendFormat": "Avg Score"
+        }
+      ]
+    }
+  ]
+}

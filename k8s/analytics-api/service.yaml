@@ -1,0 +1,38 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Analytics API — Kubernetes Service (LoadBalancer)
+# Exposes the Analytics API externally via an AWS NLB.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-api-service
+  namespace: financial-risk
+  labels:
+    app: analytics-api
+    app.kubernetes.io/name: analytics-api-service
+    app.kubernetes.io/part-of: financial-risk-platform
+  annotations:
+    # AWS Load Balancer Controller annotations
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-interval-seconds: "30"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-timeout-seconds: "10"
+    service.beta.kubernetes.io/aws-load-balancer-healthy-threshold-count: "2"
+    service.beta.kubernetes.io/aws-load-balancer-unhealthy-threshold-count: "3"
+spec:
+  type: LoadBalancer
+  selector:
+    app: analytics-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  sessionAffinity: None
+  externalTrafficPolicy: Local   # Preserve client source IP

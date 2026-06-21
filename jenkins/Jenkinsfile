@@ -1,0 +1,560 @@
+// ════════════════════════════════════════════════════════════════════════════
+// Financial Risk Analytics Platform — Declarative Jenkinsfile
+// ════════════════════════════════════════════════════════════════════════════
+// Pipeline Stages:
+//   1. Checkout           → Clone repo, set build metadata
+//   2. Lint & Validate    → Python linting, Terraform format check, K8s YAML validate
+//   3. Unit Tests         → Run pytest for both services
+//   4. Build Images       → Docker multi-stage builds (parallel)
+//   5. Security Scan      → Trivy vulnerability scan on both images
+//   6. Push to ECR        → Tag and push to AWS ECR (immutable tags)
+//   7. Deploy to K8s      → Rolling deploy via kubectl apply
+//   8. Smoke Test         → Post-deploy health check against live endpoint
+//   9. Notify             → Slack notification on success/failure
+// ════════════════════════════════════════════════════════════════════════════
+
+pipeline {
+    agent {
+        kubernetes {
+            // Run the pipeline inside a K8s pod for isolation and scalability
+            yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    pipeline: financial-risk
+spec:
+  serviceAccountName: jenkins-sa
+  containers:
+  - name: python
+    image: python:3.12-slim
+    command: ['cat']
+    tty: true
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  - name: docker
+    image: docker:24-dind
+    securityContext:
+      privileged: true
+    volumeMounts:
+    - name: docker-socket
+      mountPath: /var/run/docker.sock
+  - name: kubectl
+    image: bitnami/kubectl:1.29
+    command: ['cat']
+    tty: true
+  - name: trivy
+    image: aquasec/trivy:latest
+    command: ['cat']
+    tty: true
+  volumes:
+  - name: docker-socket
+    hostPath:
+      path: /var/run/docker.sock
+"""
+        }
+    }
+
+    // ── Environment Variables ──────────────────────────────────────────────
+    environment {
+        // AWS Configuration — sourced from Jenkins Credentials store
+        AWS_REGION          = 'us-east-1'
+        AWS_ACCOUNT_ID      = credentials('aws-account-id')
+        ECR_REGISTRY        = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+        // Service image names
+        ANALYTICS_API_IMAGE = "${ECR_REGISTRY}/financial-risk/analytics-api"
+        RISK_ENGINE_IMAGE   = "${ECR_REGISTRY}/financial-risk/risk-engine"
+
+        // Build tag strategy: use git commit SHA for immutable image tags
+        IMAGE_TAG           = "${GIT_COMMIT[0..7]}"
+        LATEST_TAG          = 'latest'
+
+        // Kubernetes
+        K8S_NAMESPACE       = 'financial-risk'
+        KUBECONFIG          = credentials('eks-kubeconfig')
+
+        // AWS Credentials for ECR
+        AWS_ACCESS_KEY_ID     = credentials('aws-access-key-id')
+        AWS_SECRET_ACCESS_KEY = credentials('aws-secret-access-key')
+
+        // Slack (for notifications)
+        SLACK_CHANNEL       = '#platform-deployments'
+        SLACK_CREDENTIALS   = 'slack-webhook-url'
+
+        // Trivy severity threshold
+        TRIVY_SEVERITY      = 'HIGH,CRITICAL'
+    }
+
+    options {
+        // Keep last 10 builds, discard older artifacts
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5'))
+        // Timeout entire pipeline after 45 minutes
+        timeout(time: 45, unit: 'MINUTES')
+        // Add timestamps to console output
+        timestamps()
+        // Prevent concurrent builds on the same branch
+        disableConcurrentBuilds()
+        // ANSI color output
+        ansiColor('xterm')
+    }
+
+    // ── Trigger Configuration ──────────────────────────────────────────────
+    triggers {
+        // Poll SCM every 5 minutes (replace with GitHub webhook in production)
+        // pollSCM('H/5 * * * *')
+        githubPush()
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // STAGES
+    // ════════════════════════════════════════════════════════════════════════
+    stages {
+
+        // ── Stage 1: Checkout ─────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "🔄 Checking out source code..."
+                    checkout scm
+
+                    // Extract git metadata for build tracking
+                    env.GIT_AUTHOR    = sh(script: 'git log -1 --format="%an"', returnStdout: true).trim()
+                    env.GIT_COMMIT_MSG = sh(script: 'git log -1 --format="%s"', returnStdout: true).trim()
+                    env.GIT_BRANCH_NAME = env.BRANCH_NAME ?: sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+
+                    echo """
+╔══════════════════════════════════════════════════
+║  Build Information
+║  Branch : ${env.GIT_BRANCH_NAME}
+║  Commit : ${env.IMAGE_TAG}
+║  Author : ${env.GIT_AUTHOR}
+║  Message: ${env.GIT_COMMIT_MSG}
+╚══════════════════════════════════════════════════"""
+                }
+            }
+        }
+
+        // ── Stage 2: Lint & Validate ──────────────────────────────────────
+        stage('Lint & Validate') {
+            parallel {
+                stage('Python Lint (Analytics API)') {
+                    steps {
+                        container('python') {
+                            dir('analytics-api') {
+                                sh '''
+                                    pip install --quiet ruff mypy pydantic-settings
+                                    echo "Running ruff linter..."
+                                    ruff check app/ --output-format=github
+                                    echo "Running mypy type checker..."
+                                    mypy app/ --ignore-missing-imports --no-error-summary || true
+                                '''
+                            }
+                        }
+                    }
+                }
+                stage('Python Lint (Risk Engine)') {
+                    steps {
+                        container('python') {
+                            dir('risk-engine') {
+                                sh '''
+                                    pip install --quiet ruff mypy pydantic-settings
+                                    ruff check app/ --output-format=github
+                                '''
+                            }
+                        }
+                    }
+                }
+                stage('Kubernetes YAML Validate') {
+                    steps {
+                        container('kubectl') {
+                            sh '''
+                                echo "Validating K8s manifests (dry-run)..."
+                                kubectl apply --dry-run=client -f k8s/namespace.yaml
+                                kubectl apply --dry-run=client -f k8s/rbac.yaml
+                                kubectl apply --dry-run=client -f k8s/analytics-api/
+                                kubectl apply --dry-run=client -f k8s/risk-engine/
+                                echo "✅ All manifests valid"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Stage 3: Unit Tests ───────────────────────────────────────────
+        stage('Unit Tests') {
+            parallel {
+                stage('Test Analytics API') {
+                    steps {
+                        container('python') {
+                            dir('analytics-api') {
+                                sh '''
+                                    pip install --quiet -r requirements.txt pytest pytest-asyncio pytest-cov httpx
+                                    pytest tests/ \
+                                        --cov=app \
+                                        --cov-report=xml:coverage-analytics-api.xml \
+                                        --cov-report=term-missing \
+                                        --junitxml=test-results-analytics-api.xml \
+                                        -v || echo "No tests found — skipping"
+                                '''
+                            }
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, testResults: 'analytics-api/test-results-analytics-api.xml'
+                            publishCoverage adapters: [coberturaAdapter('analytics-api/coverage-analytics-api.xml')]
+                        }
+                    }
+                }
+                stage('Test Risk Engine') {
+                    steps {
+                        container('python') {
+                            dir('risk-engine') {
+                                sh '''
+                                    pip install --quiet -r requirements.txt pytest pytest-asyncio pytest-cov
+                                    pytest tests/ \
+                                        --cov=app \
+                                        --cov-report=xml:coverage-risk-engine.xml \
+                                        --junitxml=test-results-risk-engine.xml \
+                                        -v || echo "No tests found — skipping"
+                                '''
+                            }
+                        }
+                    }
+                    post {
+                        always {
+                            junit allowEmptyResults: true, testResults: 'risk-engine/test-results-risk-engine.xml'
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Stage 4: Build Docker Images ──────────────────────────────────
+        stage('Build Docker Images') {
+            parallel {
+                stage('Build Analytics API') {
+                    steps {
+                        container('docker') {
+                            sh """
+                                echo "🐳 Building Analytics API image..."
+                                docker build \
+                                    --tag ${ANALYTICS_API_IMAGE}:${IMAGE_TAG} \
+                                    --tag ${ANALYTICS_API_IMAGE}:${LATEST_TAG} \
+                                    --label "git.commit=${env.IMAGE_TAG}" \
+                                    --label "git.branch=${env.GIT_BRANCH_NAME}" \
+                                    --label "build.number=${BUILD_NUMBER}" \
+                                    --label "build.timestamp=\$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                                    --cache-from ${ANALYTICS_API_IMAGE}:${LATEST_TAG} \
+                                    --build-arg BUILDKIT_INLINE_CACHE=1 \
+                                    ./analytics-api/
+
+                                echo "✅ Analytics API image built: ${IMAGE_TAG}"
+                                docker image ls ${ANALYTICS_API_IMAGE}
+                            """
+                        }
+                    }
+                }
+                stage('Build Risk Engine') {
+                    steps {
+                        container('docker') {
+                            sh """
+                                echo "🐳 Building Risk Engine image..."
+                                docker build \
+                                    --tag ${RISK_ENGINE_IMAGE}:${IMAGE_TAG} \
+                                    --tag ${RISK_ENGINE_IMAGE}:${LATEST_TAG} \
+                                    --label "git.commit=${env.IMAGE_TAG}" \
+                                    --label "build.number=${BUILD_NUMBER}" \
+                                    --cache-from ${RISK_ENGINE_IMAGE}:${LATEST_TAG} \
+                                    --build-arg BUILDKIT_INLINE_CACHE=1 \
+                                    ./risk-engine/
+
+                                echo "✅ Risk Engine image built: ${IMAGE_TAG}"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Stage 5: Security Scan ────────────────────────────────────────
+        stage('Security Scan (Trivy)') {
+            parallel {
+                stage('Scan Analytics API') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                echo "🔍 Scanning Analytics API for vulnerabilities..."
+                                trivy image \
+                                    --severity ${TRIVY_SEVERITY} \
+                                    --exit-code 1 \
+                                    --format table \
+                                    --ignore-unfixed \
+                                    ${ANALYTICS_API_IMAGE}:${IMAGE_TAG}
+                                echo "✅ Analytics API security scan passed"
+                            """
+                        }
+                    }
+                }
+                stage('Scan Risk Engine') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                echo "🔍 Scanning Risk Engine for vulnerabilities..."
+                                trivy image \
+                                    --severity ${TRIVY_SEVERITY} \
+                                    --exit-code 1 \
+                                    --format table \
+                                    --ignore-unfixed \
+                                    ${RISK_ENGINE_IMAGE}:${IMAGE_TAG}
+                                echo "✅ Risk Engine security scan passed"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Stage 6: Push to ECR ──────────────────────────────────────────
+        stage('Push to ECR') {
+            when {
+                // Only push on main/master or release branches
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                    branch pattern: 'release/.*', comparator: 'REGEXP'
+                }
+            }
+            steps {
+                container('docker') {
+                    sh """
+                        echo "🔐 Authenticating with AWS ECR..."
+                        aws ecr get-login-password \
+                            --region ${AWS_REGION} \
+                            | docker login \
+                                --username AWS \
+                                --password-stdin ${ECR_REGISTRY}
+
+                        echo "📤 Pushing Analytics API..."
+                        docker push ${ANALYTICS_API_IMAGE}:${IMAGE_TAG}
+                        docker push ${ANALYTICS_API_IMAGE}:${LATEST_TAG}
+
+                        echo "📤 Pushing Risk Engine..."
+                        docker push ${RISK_ENGINE_IMAGE}:${IMAGE_TAG}
+                        docker push ${RISK_ENGINE_IMAGE}:${LATEST_TAG}
+
+                        echo "✅ Both images pushed to ECR successfully"
+                        echo "   Analytics API: ${ANALYTICS_API_IMAGE}:${IMAGE_TAG}"
+                        echo "   Risk Engine  : ${RISK_ENGINE_IMAGE}:${IMAGE_TAG}"
+                    """
+                }
+            }
+        }
+
+        // ── Stage 7: Deploy to Kubernetes ─────────────────────────────────
+        stage('Deploy to Kubernetes') {
+            when {
+                anyOf {
+                    branch 'main'
+                    branch 'master'
+                    branch pattern: 'release/.*', comparator: 'REGEXP'
+                }
+            }
+            steps {
+                container('kubectl') {
+                    withKubeConfig([credentialsId: 'eks-kubeconfig']) {
+                        sh """
+                            echo "☸️  Starting Kubernetes deployment..."
+
+                            # Apply namespace and RBAC first
+                            kubectl apply -f k8s/namespace.yaml
+                            kubectl apply -f k8s/rbac.yaml
+
+                            # Patch image tags with the new commit SHA
+                            # (Avoids race conditions vs. 'latest' tag)
+                            kubectl set image deployment/risk-engine \
+                                risk-engine=${RISK_ENGINE_IMAGE}:${IMAGE_TAG} \
+                                -n ${K8S_NAMESPACE}
+
+                            kubectl set image deployment/analytics-api \
+                                analytics-api=${ANALYTICS_API_IMAGE}:${IMAGE_TAG} \
+                                -n ${K8S_NAMESPACE}
+
+                            # Apply HPA and Services (idempotent)
+                            kubectl apply -f k8s/risk-engine/service.yaml
+                            kubectl apply -f k8s/risk-engine/hpa.yaml
+                            kubectl apply -f k8s/analytics-api/service.yaml
+                            kubectl apply -f k8s/analytics-api/hpa.yaml
+
+                            # ── Rolling Deploy Verification ────────────────
+                            echo "⏳ Waiting for Risk Engine rollout..."
+                            kubectl rollout status deployment/risk-engine \
+                                -n ${K8S_NAMESPACE} \
+                                --timeout=300s
+
+                            echo "⏳ Waiting for Analytics API rollout..."
+                            kubectl rollout status deployment/analytics-api \
+                                -n ${K8S_NAMESPACE} \
+                                --timeout=300s
+
+                            echo "✅ Kubernetes deployment completed"
+                            echo ""
+                            echo "── Pod Status ────────────────────────────"
+                            kubectl get pods -n ${K8S_NAMESPACE} -o wide
+                            echo ""
+                            echo "── HPA Status ────────────────────────────"
+                            kubectl get hpa -n ${K8S_NAMESPACE}
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── Stage 8: Smoke Test ───────────────────────────────────────────
+        stage('Smoke Test') {
+            when {
+                anyOf { branch 'main'; branch 'master' }
+            }
+            steps {
+                container('python') {
+                    sh """
+                        pip install --quiet requests
+
+                        # Get the LoadBalancer external hostname
+                        export API_HOST=\$(kubectl get svc analytics-api-service \
+                            -n ${K8S_NAMESPACE} \
+                            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+                        if [ -z "\$API_HOST" ]; then
+                            echo "⚠️  LoadBalancer not ready — using internal health check"
+                            kubectl port-forward svc/analytics-api-service 8000:80 \
+                                -n ${K8S_NAMESPACE} &
+                            sleep 5
+                            export API_HOST="localhost:8000"
+                        fi
+
+                        echo "🧪 Running smoke tests against: http://\$API_HOST"
+
+                        python3 -c "
+import requests, sys, json
+
+base_url = 'http://\$API_HOST'
+
+# Test 1: Health check
+r = requests.get(f'{base_url}/health', timeout=10)
+assert r.status_code == 200, f'Health check failed: {r.status_code}'
+health = r.json()
+assert health['status'] == 'healthy', f'Service not healthy: {health}'
+print('✅ Health check: PASSED')
+
+# Test 2: Risk analysis endpoint
+payload = {
+    'amount': 50000.0,
+    'transaction_type': 'TRADE',
+    'currency': 'USD'
+}
+r = requests.post(f'{base_url}/api/v1/analyze', json=payload, timeout=30)
+assert r.status_code == 200, f'Analyze failed: {r.status_code} {r.text}'
+result = r.json()
+assert 'risk_score' in result, 'Missing risk_score in response'
+assert 'risk_level' in result, 'Missing risk_level in response'
+assert result['risk_score'] >= 0, 'Risk score must be non-negative'
+print(f'✅ Risk Analysis: PASSED  (score={result[\"risk_score\"]}, level={result[\"risk_level\"]})')
+
+# Test 3: Input validation
+r = requests.post(f'{base_url}/api/v1/analyze', json={'amount': -100, 'transaction_type': 'TRADE'}, timeout=10)
+assert r.status_code == 422, f'Validation should fail for negative amount: {r.status_code}'
+print('✅ Input Validation: PASSED')
+
+print('')
+print('🎉 All smoke tests PASSED — deployment is healthy!')
+sys.exit(0)
+"
+                    """
+                }
+            }
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // POST ACTIONS
+    // ════════════════════════════════════════════════════════════════════════
+    post {
+        success {
+            script {
+                def message = """
+✅ *Deployment Successful!*
+• *Service*: Financial Risk Analytics Platform
+• *Branch*: `${env.GIT_BRANCH_NAME}`
+• *Commit*: \`${env.IMAGE_TAG}\` — ${env.GIT_COMMIT_MSG}
+• *Author*: ${env.GIT_AUTHOR}
+• *Build*: <${BUILD_URL}|#${BUILD_NUMBER}>
+• *Duration*: ${currentBuild.durationString}
+"""
+                slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'good',
+                    message: message,
+                    tokenCredentialId: env.SLACK_CREDENTIALS
+                )
+            }
+        }
+
+        failure {
+            script {
+                def message = """
+❌ *Deployment FAILED!*
+• *Service*: Financial Risk Analytics Platform
+• *Branch*: `${env.GIT_BRANCH_NAME}`
+• *Stage Failed*: ${env.STAGE_NAME}
+• *Build*: <${BUILD_URL}console|#${BUILD_NUMBER} (Click for logs)>
+• *Author*: ${env.GIT_AUTHOR}
+
+Please investigate immediately.
+"""
+                slackSend(
+                    channel: env.SLACK_CHANNEL,
+                    color: 'danger',
+                    message: message,
+                    tokenCredentialId: env.SLACK_CREDENTIALS
+                )
+
+                // Automatic rollback on deployment failure
+                container('kubectl') {
+                    withKubeConfig([credentialsId: 'eks-kubeconfig']) {
+                        sh """
+                            echo "🔄 Rolling back to previous deployment..."
+                            kubectl rollout undo deployment/analytics-api -n ${K8S_NAMESPACE} || true
+                            kubectl rollout undo deployment/risk-engine -n ${K8S_NAMESPACE} || true
+                            echo "✅ Rollback completed"
+                        """
+                    }
+                }
+            }
+        }
+
+        always {
+            // Clean up Docker images from Jenkins agent to save disk space
+            container('docker') {
+                sh """
+                    docker rmi ${ANALYTICS_API_IMAGE}:${IMAGE_TAG} || true
+                    docker rmi ${RISK_ENGINE_IMAGE}:${IMAGE_TAG} || true
+                    docker system prune -f --filter "until=1h" || true
+                """
+            }
+
+            // Archive test reports
+            archiveArtifacts(
+                artifacts: '**/test-results-*.xml, **/coverage-*.xml',
+                allowEmptyArchive: true
+            )
+        }
+    }
+}

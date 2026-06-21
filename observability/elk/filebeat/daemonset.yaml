@@ -1,0 +1,187 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Filebeat DaemonSet
+# Runs on EVERY K8s node to collect container logs and ship to Logstash.
+# Automatically discovers all pods and enriches logs with K8s metadata.
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: filebeat
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: filebeat
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "pods", "nodes"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: filebeat
+subjects:
+  - kind: ServiceAccount
+    name: filebeat
+    namespace: monitoring
+roleRef:
+  kind: ClusterRole
+  name: filebeat
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: filebeat-config
+  namespace: monitoring
+  labels:
+    app: filebeat
+data:
+  filebeat.yml: |
+    # ── Filebeat Configuration ───────────────────────────────────────────────
+    filebeat.inputs:
+      # Collect container logs from all pods on this node
+      - type: container
+        paths:
+          - /var/log/containers/*.log
+        # Enrich with Kubernetes metadata automatically
+        processors:
+          - add_kubernetes_metadata:
+              host: ${NODE_NAME}
+              matchers:
+                - logs_path:
+                    logs_path: "/var/log/containers/"
+
+    # ── Autodiscovery — auto-detect new pods ─────────────────────────────────
+    filebeat.autodiscover:
+      providers:
+        - type: kubernetes
+          node: ${NODE_NAME}
+          hints.enabled: true
+          hints.default_config:
+            type: container
+            paths:
+              - /var/log/containers/${data.kubernetes.pod.name}_${data.kubernetes.namespace}_${data.kubernetes.container.name}-*.log
+          templates:
+            # Analytics API — collect structured JSON logs
+            - condition:
+                equals:
+                  kubernetes.labels.app: "analytics-api"
+              config:
+                - type: container
+                  paths:
+                    - /var/log/containers/${data.kubernetes.pod.name}*.log
+                  json.keys_under_root: true
+                  json.overwrite_keys: true
+                  json.add_error_key: true
+            # Risk Engine logs
+            - condition:
+                equals:
+                  kubernetes.labels.app: "risk-engine"
+              config:
+                - type: container
+                  paths:
+                    - /var/log/containers/${data.kubernetes.pod.name}*.log
+                  json.keys_under_root: true
+                  json.overwrite_keys: true
+
+    # ── Processors ────────────────────────────────────────────────────────────
+    processors:
+      # Drop noisy readiness/liveness probe logs
+      - drop_event:
+          when:
+            regexp:
+              message: "(GET /health|GET /metrics)"
+      # Add environment metadata
+      - add_fields:
+          target: ""
+          fields:
+            environment: "production"
+            platform: "financial-risk"
+
+    # ── Output: Send to Logstash ──────────────────────────────────────────────
+    output.logstash:
+      hosts: ["logstash:5044"]
+      loadbalance: true
+      worker: 2
+      compression_level: 3
+
+    # ── Monitoring ────────────────────────────────────────────────────────────
+    monitoring.enabled: false
+
+    logging.level: warning
+    logging.to_files: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: filebeat
+  namespace: monitoring
+  labels:
+    app: filebeat
+spec:
+  selector:
+    matchLabels:
+      app: filebeat
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      serviceAccountName: filebeat
+      terminationGracePeriodSeconds: 30
+      hostNetwork: true        # Access to node networking for log collection
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: filebeat
+          image: docker.elastic.co/beats/filebeat:8.13.2
+          args: ["-c", "/etc/filebeat.yml", "-e"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          securityContext:
+            runAsUser: 0        # Filebeat needs root to read /var/log/containers
+            privileged: false
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "100Mi"
+            limits:
+              cpu: "200m"
+              memory: "200Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/filebeat.yml
+              subPath: filebeat.yml
+              readOnly: true
+            # Mount host log directory (container stdout/stderr)
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+            - name: varlogcontainers
+              mountPath: /var/log/containers
+              readOnly: true
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: filebeat-config
+            defaultMode: 0600
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+        - name: varlogcontainers
+          hostPath:
+            path: /var/log/containers
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods

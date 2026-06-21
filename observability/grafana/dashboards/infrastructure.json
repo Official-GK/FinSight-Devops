@@ -1,0 +1,28 @@
+{
+  "title": "Infrastructure Monitoring",
+  "timezone": "browser",
+  "panels": [
+    {
+      "title": "CPU Usage (Pods)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"\"}[1m])) by (pod)",
+          "legendFormat": "{{pod}}"
+        }
+      ]
+    },
+    {
+      "title": "Pod Count",
+      "type": "stat",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "count(kube_pod_info)",
+          "legendFormat": "Total Pods"
+        }
+      ]
+    }
+  ]
+}

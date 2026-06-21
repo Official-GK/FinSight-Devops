@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: finsight
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finsight-config
+  namespace: finsight
+data:
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  RISK_ENGINE_URL: "http://risk-engine-service:8001"
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "finsight_db"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: finsight-secrets
+  namespace: finsight
+type: Opaque
+data:
+  # Base64 encoded 'postgres'
+  DB_USER: "cG9zdGdyZXM="
+  # Base64 encoded 'supersecretpassword'
+  DB_PASS: "c3VwZXJzZWNyZXRwYXNzd29yZA=="
+  # Base64 encoded 'vault-token-123'
+  VAULT_TOKEN: "dmF1bHQtdG9rZW4tMTIz"

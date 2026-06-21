@@ -1,0 +1,36 @@
+services:
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: finsight-jenkins
+    user: root
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      # Jenkins data persistence
+      - jenkins_home:/var/jenkins_home
+      # Mount Docker socket so Jenkins can build Docker images
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount the project directory so Jenkins can access it
+      - /Users/gauravkulkarni/Desktop/Devops_financialRisk:/workspace/finsight
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - JAVA_OPTS=-Xmx512m
+    restart: unless-stopped
+
+  # Jenkins Configuration as Code initializer
+  jenkins-init:
+    image: docker:24-cli
+    container_name: finsight-jenkins-init
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: >
+      sh -c "apk add --no-cache curl &&
+             echo 'Jenkins init container ready' &&
+             sleep infinity"
+    depends_on:
+      - jenkins
+
+volumes:
+  jenkins_home:
+    name: finsight_jenkins_home

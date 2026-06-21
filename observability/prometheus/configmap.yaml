@@ -1,0 +1,244 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Prometheus ConfigMap — prometheus.yml scrape configuration
+# Explicitly configured to scrape the /metrics endpoints built in Phase 1
+# ──────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    app: prometheus
+data:
+  prometheus.yml: |
+    # ── Global Configuration ─────────────────────────────────────────────────
+    global:
+      scrape_interval:     15s       # How frequently to scrape targets
+      evaluation_interval: 15s       # How frequently to evaluate alerting rules
+      scrape_timeout:      10s       # Timeout for each scrape request
+      external_labels:
+        cluster: 'financial-risk-eks'
+        environment: 'production'
+        region: 'us-east-1'
+
+    # ── Alertmanager ─────────────────────────────────────────────────────────
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+                - alertmanager:9093
+
+    # ── Rule Files ────────────────────────────────────────────────────────────
+    rule_files:
+      - "/etc/prometheus/rules/*.yml"
+
+    # ── Scrape Configurations ─────────────────────────────────────────────────
+    scrape_configs:
+
+      # ── Prometheus Self-Monitoring ──────────────────────────────────────────
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+        metrics_path: '/metrics'
+
+      # ── Analytics API (Phase 1 Service) ────────────────────────────────────
+      # Uses Kubernetes service discovery to find all Analytics API pods.
+      # The prometheus.io annotations set in the Deployment trigger this.
+      - job_name: 'analytics-api'
+        scrape_interval: 10s
+        metrics_path: '/metrics'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - financial-risk
+        relabel_configs:
+          # Only scrape pods with prometheus.io/scrape: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          # Use the port from the annotation
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            target_label: __address__
+            regex: (.+)
+            replacement: '${1}'
+          # Apply the path from annotation
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          # Only scrape pods with app=analytics-api label
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: analytics-api
+          # Construct the full scrape address
+          - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: (.+);(.+)
+            replacement: '$1:$2'
+            target_label: __address__
+          # Add pod metadata as labels
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: kubernetes_pod_name
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: kubernetes_node
+          - source_labels: [__meta_kubernetes_pod_label_version]
+            target_label: version
+
+      # ── Risk Engine (Phase 1 Service) ────────────────────────────────────────
+      - job_name: 'risk-engine'
+        scrape_interval: 10s
+        metrics_path: '/metrics'
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names:
+                - financial-risk
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: risk-engine
+          - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: (.+);(.+)
+            replacement: '$1:$2'
+            target_label: __address__
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: kubernetes_pod_name
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: kubernetes_node
+
+      # ── Kubernetes API Server ─────────────────────────────────────────────
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # ── Kubernetes Nodes (cAdvisor) ───────────────────────────────────────
+      - job_name: 'kubernetes-nodes'
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
+
+      # ── Kubernetes Pods (Generic) ─────────────────────────────────────────
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__meta_kubernetes_pod_ip, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: (.+);(.+)
+            replacement: '$1:$2'
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+
+  # ── Alerting Rules ──────────────────────────────────────────────────────────
+  financial_risk_alerts.yml: |
+    groups:
+      - name: financial-risk-platform
+        interval: 30s
+        rules:
+
+          # Analytics API Down
+          - alert: AnalyticsAPIDown
+            expr: up{job="analytics-api"} == 0
+            for: 1m
+            labels:
+              severity: critical
+              service: analytics-api
+            annotations:
+              summary: "Analytics API pod is down"
+              description: "Pod {{ $labels.kubernetes_pod_name }} has been unreachable for 1 minute."
+
+          # High Risk Score Rate
+          - alert: HighCriticalRiskTransactionRate
+            expr: |
+              rate(analytics_api_transactions_analyzed_total{risk_level="CRITICAL"}[5m]) > 10
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High rate of CRITICAL risk transactions"
+              description: "More than 10 CRITICAL-risk transactions per second for 2 minutes."
+
+          # Risk Engine Latency Degradation
+          - alert: RiskEngineHighLatency
+            expr: |
+              histogram_quantile(0.95,
+                rate(analytics_api_risk_engine_call_duration_seconds_bucket[5m])
+              ) > 5.0
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Risk Engine P95 latency > 5 seconds"
+              description: "95th percentile Risk Engine response time is {{ $value }}s."
+
+          # HPA at Maximum Replicas
+          - alert: HPAMaxReplicasReached
+            expr: |
+              kube_horizontalpodautoscaler_status_current_replicas{namespace="financial-risk"}
+              >= kube_horizontalpodautoscaler_spec_max_replicas{namespace="financial-risk"}
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "HPA has reached maximum replicas — cannot scale further"
+              description: "{{ $labels.horizontalpodautoscaler }} is at max capacity."
+
+          # Error Rate Spike
+          - alert: HighErrorRate
+            expr: |
+              rate(analytics_api_requests_total{http_status=~"5.."}[5m])
+              / rate(analytics_api_requests_total[5m]) > 0.05
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Error rate above 5%"
+              description: "{{ $value | humanizePercentage }} of requests are returning 5xx errors."
