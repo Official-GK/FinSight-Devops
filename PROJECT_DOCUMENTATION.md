@@ -234,6 +234,18 @@ The platform can be enhanced with:
 * Service Mesh (Istio) for advanced traffic routing and mTLS
 * Advanced compliance support (PCI-DSS / SOC2)
 
-# 9. Links:
-**Github:** [Insert Your GitHub Repo URL Here]
-**Live Demo:** http://16.170.218.31:30080
+# 9. Project Links & Endpoints
+
+**Code Repository:**
+* **Github:** https://github.com/Official-GK/FinSight-Devops.git
+
+**Live Cloud Endpoints (AWS K3s):**
+* **Frontend Dashboard:** http://16.170.218.31:30080
+* **Analytics API (Swagger UI):** http://16.170.218.31:30800/docs
+* **HashiCorp Vault (Secrets):** http://16.170.218.31:30200
+* **Grafana (Dashboards):** http://16.170.218.31:30300
+* **Prometheus (Metrics):** http://16.170.218.31:30909
+* **Kibana (Centralized Logs):** http://16.170.218.31:30561
+
+**Local CI/CD:**
+* **Jenkins Pipeline:** http://localhost:8080
